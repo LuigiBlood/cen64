@@ -25,6 +25,7 @@
 #include "bus/controller.h"
 #include "dd/controller.h"
 #include "vr4300/interface.h"
+#include <time.h>
 
 #ifdef DEBUG_MMIO_REGISTER_ACCESS
 const char *dd_register_mnemonics[NUM_DD_REGISTERS] = {
@@ -36,17 +37,17 @@ const char *dd_register_mnemonics[NUM_DD_REGISTERS] = {
 
 // ASIC_CMD_STATUS flags.
 #define DD_CMD_NOOP           0x00000000U
-#define DD_CMD_SEEK_READ      0x00010001U
-#define DD_CMD_SEEK_WRITE     0x00020001U
-#define DD_CMD_RECALIBRATE    0x00030001U // ???
+#define DD_CMD_SEEK_READ      0x00010000U //Disk needed
+#define DD_CMD_SEEK_WRITE     0x00020000U //Disk needed
+#define DD_CMD_RECALIBRATE    0x00030000U // ??? Disk needed
 #define DD_CMD_SLEEP          0x00040000U
-#define DD_CMD_START          0x00050001U
+#define DD_CMD_START          0x00050000U //Disk needed
 #define DD_CMD_SET_STANDBY    0x00060000U
 #define DD_CMD_SET_SLEEP      0x00070000U
 #define DD_CMD_CLR_DSK_CHNG   0x00080000U
 #define DD_CMD_CLR_RESET      0x00090000U
 #define DD_CMD_READ_VERSION   0x000A0000U
-#define DD_CMD_SET_DISK_TYPE  0x000B0001U
+#define DD_CMD_SET_DISK_TYPE  0x000B0000U //Disk needed
 #define DD_CMD_REQUEST_STATUS 0x000C0000U
 #define DD_CMD_STANDBY        0x000D0000U
 #define DD_CMD_IDX_LOCK_RETRY 0x000E0000U // ???
@@ -119,24 +120,77 @@ int write_dd_regs(void *opaque, uint32_t address, uint32_t word, uint32_t dqm) {
 
   debug_mmio_write(dd, dd_register_mnemonics[reg], word, dqm);
 
+  //No matter what, the lower 16-bit is always ignored.
+  word &= 0xFFFF0000U;
+
   // Command register written: do something.
   if (reg == DD_ASIC_CMD_STATUS) {
 
+    time_t timer;
+    struct tm * timeinfo;
     // Get time [minute/second]:
     if (word == DD_CMD_GET_MIN_SEC) {
-      // dd->regs[DD_ASIC_DATA] = ...
-    }
+      //Get Time
+      time(&timer);
+      timeinfo = localtime(&timer);
 
+      //Put time in DATA as BCD
+      uint8_t min = (uint8_t)(((timeinfo->tm_min / 10) << 4) | (timeinfo->tm_min % 10));
+      uint8_t sec = (uint8_t)(((timeinfo->tm_sec / 10) << 4) | (timeinfo->tm_sec % 10));
+
+      dd->regs[DD_ASIC_DATA] = (min << 24) | (sec << 16);
+    }
+    // Get time [day/hour]:
     else if (word == DD_CMD_GET_DAY_HOUR) {
-      // dd->regs[DD_ASIC_DATA] = ...
-    }
+      //Get Time
+      time(&timer);
+      timeinfo = localtime(&timer);
 
+      //Put time in DATA as BCD
+      uint8_t hour = (uint8_t)(((timeinfo->tm_hour / 10) << 4) | (timeinfo->tm_hour % 10));
+      uint8_t day = (uint8_t)(((timeinfo->tm_mday / 10) << 4) | (timeinfo->tm_mday % 10));
+
+      dd->regs[DD_ASIC_DATA] = (day << 24) | (hour << 16);
+    }
+    // Get time [year/month]:
     else if (word == DD_CMD_GET_YEAR_MONTH) {
-      // dd->regs[DD_ASIC_DATA] = ...
+      //Get Time
+      time(&timer);
+      timeinfo = localtime(&timer);
+
+      //Put time in DATA as BCD
+      uint8_t year = (uint8_t)(((timeinfo->tm_year / 10) << 4) | (timeinfo->tm_year % 10));
+      uint8_t month = (uint8_t)((((timeinfo->tm_mon++) / 10) << 4) | ((timeinfo->tm_mon++) % 10));
+
+      dd->regs[DD_ASIC_DATA] = (year << 24) | (month << 16);
     }
 
+    //Clear Disk Change status bit
+    else if (word == DD_CMD_CLR_DSK_CHNG)
+      dd->regs[DD_ASIC_CMD_STATUS] &= ~DD_STATUS_DISK_CHNG;
+
+    //Clear Reset status bit
     else if (word == DD_CMD_CLR_RESET)
       dd->regs[DD_ASIC_CMD_STATUS] &= ~DD_STATUS_RST_STATE;
+
+    //Feature Inquiry
+    else if (word == DD_CMD_FEATURE_INQ)
+      dd->regs[DD_ASIC_DATA] = 0x00010000U;
+
+    //Sleep
+    else if (word == DD_CMD_SLEEP)
+      dd->regs[DD_ASIC_CMD_STATUS] ^= (DD_STATUS_MTR_N_SPIN ^ DD_STATUS_HEAD_RTRCT);
+
+    //Standby
+    else if (word == DD_CMD_STANDBY)
+    {
+      dd->regs[DD_ASIC_CMD_STATUS] ^= DD_STATUS_HEAD_RTRCT;
+      dd->regs[DD_ASIC_CMD_STATUS] &= ~DD_STATUS_MTR_N_SPIN;
+    }
+
+    //Start
+    else if (word == DD_CMD_START)
+      dd->regs[DD_ASIC_CMD_STATUS] &= ~(DD_STATUS_MTR_N_SPIN ^ DD_STATUS_HEAD_RTRCT);
 
     // Always signal an interrupt in response.
     dd->regs[DD_ASIC_CMD_STATUS] |= DD_STATUS_MECHA_INT;
@@ -146,7 +200,10 @@ int write_dd_regs(void *opaque, uint32_t address, uint32_t word, uint32_t dqm) {
   // Buffer manager control request: handle it.
   else if (reg == DD_ASIC_BM_STATUS_CTL) {
     if (word == DD_BM_CTL_RESET)
+    {
       dd->regs[DD_ASIC_BM_STATUS_CTL] &= ~DD_BM_CTL_INTMASK;
+      dd->regs[DD_ASIC_CMD_STATUS] &= ~DD_STATUS_BM_INT;
+    }
 
     else if (word == DD_BM_CTL_MECHA_RST)
       dd->regs[DD_ASIC_CMD_STATUS] &= ~DD_STATUS_MECHA_INT;
