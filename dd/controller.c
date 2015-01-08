@@ -100,6 +100,9 @@ int dd_init(struct dd_controller *dd, struct bus_controller *bus,
   dd->rom = ddrom;
   dd->rom_size = ddrom_size;
 
+  if (ddrom != NULL)    //Disk is loaded, so it's present.
+    dd->regs[DD_ASIC_CMD_STATUS] ^= DD_STATUS_DISK_PRES;
+
   return 0;
 }
 
@@ -194,6 +197,14 @@ int write_dd_regs(void *opaque, uint32_t address, uint32_t word, uint32_t dqm) {
     else if (word == DD_CMD_START)
       dd->regs[DD_ASIC_CMD_STATUS] &= ~(DD_STATUS_MTR_N_SPIN ^ DD_STATUS_HEAD_RTRCT);
 
+    //SEEK READ
+    else if (word == DD_CMD_SEEK_READ)
+      dd->regs[DD_ASIC_CUR_TK] = dd->regs[DD_ASIC_DATA];
+
+    //SEEK WRITE
+    else if (word == DD_CMD_SEEK_WRITE)
+      dd->regs[DD_ASIC_CUR_TK] = dd->regs[DD_ASIC_DATA];
+
     // Always signal an interrupt in response.
     dd->regs[DD_ASIC_CMD_STATUS] |= DD_STATUS_MECHA_INT;
     signal_dd_interrupt(dd->bus->vr4300);
@@ -219,6 +230,20 @@ int write_dd_regs(void *opaque, uint32_t address, uint32_t word, uint32_t dqm) {
     assert(word == 0xAAAA0000 && "dd: Hard reset without magic word?");
 
     dd->regs[DD_ASIC_CMD_STATUS] = DD_STATUS_RST_STATE;
+  }
+
+  else if ((reg == DD_ASIC_CUR_TK) ^
+    (reg == DD_ASIC_ERR_SECTOR) ^
+    (reg == DD_ASIC_CUR_SECTOR) ^
+    (reg == DD_ASIC_C1_S0) ^
+    (reg == DD_ASIC_C1_S2) ^
+    (reg == DD_ASIC_C1_S4) ^
+    (reg == DD_ASIC_C1_S6) ^
+    (reg == DD_ASIC_CUR_ADDR) ^
+    (reg == DD_ASIC_ID_REG) ^
+    (reg == DD_ASIC_TEST_REG))
+  {
+    // Do nothing. Not writable.
   }
 
   else {
