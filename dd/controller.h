@@ -38,6 +38,11 @@ struct dd_controller {
   uint8_t ms_ram[DD_MS_RAM_LEN];
 };
 
+void dd_clear_c2s(void *opaque);
+void dd_clear_ds(void *opaque);
+
+void dd_update_bm(void *opaque);
+
 cen64_cold int dd_init(struct dd_controller *dd, struct bus_controller *bus,
   const uint8_t *ddipl, const uint8_t *ddrom, size_t ddrom_size);
 
