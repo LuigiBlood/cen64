@@ -189,7 +189,10 @@ void dd_update_bm(void *opaque)
 	{
 		int Cur_Sector = dd->regs[DD_ASIC_CUR_SECTOR] >> 16;
 		if (Cur_Sector >= 0x5A)
+    {
+      CUR_BLOCK = 1;
 			Cur_Sector -= 0x5A;
+    }
 
     if (!dd_bm_mode_read)		//WRITE MODE
 		{
@@ -273,7 +276,7 @@ void dd_update_bm(void *opaque)
 			}
 		}
 
-		dd->regs[DD_ASIC_CUR_SECTOR] = Cur_Sector << 16;
+		dd->regs[DD_ASIC_CUR_SECTOR] = (Cur_Sector + (0x5A * CUR_BLOCK)) << 16;
 		dd->regs[DD_ASIC_CMD_STATUS] |= DD_STATUS_BM_INT;
     signal_dd_interrupt(dd->bus->vr4300);
 	}
